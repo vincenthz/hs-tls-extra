@@ -30,6 +30,7 @@ import qualified Data.ByteString as B
 import Network.TLS (Version(..))
 import Network.TLS.Cipher
 import qualified Crypto.Cipher.AES as AES
+import qualified Crypto.Cipher.Camellia as Camellia
 import qualified Crypto.Cipher.RC4 as RC4
 
 import qualified Crypto.Hash.SHA256 as SHA256
@@ -51,6 +52,9 @@ aes256_cbc_encrypt key iv d = AES.encryptCBC pkey iv d
 aes256_cbc_decrypt :: Key -> IV -> B.ByteString -> B.ByteString
 aes256_cbc_decrypt key iv d = AES.decryptCBC pkey iv d
 	where (Right pkey) = AES.initKey256 key
+
+camellia128_cbc_decrypt = aes128_cbc_decrypt
+camellia128_cbc_encrypt = aes128_cbc_encrypt
 
 toIV :: RC4.Ctx -> IV
 toIV (v, x, y) = B.pack (x : y : Vector.toList v)
@@ -88,6 +92,10 @@ ciphersuite_medium = [cipher_RC4_128_MD5, cipher_RC4_128_SHA1, cipher_AES128_SHA
 ciphersuite_strong :: [Cipher]
 ciphersuite_strong = [cipher_AES256_SHA256, cipher_AES256_SHA1]
 
+-- | camellia ciphers supported.
+ciphersuite_camellia :: [Cipher]
+ciphersuite_camellia = [cipher_Camellia128_SHA1, cipher_Camellia128_SHA256]
+
 -- | all unencrypted ciphers, do not use on insecure network.
 ciphersuite_unencrypted :: [Cipher]
 ciphersuite_unencrypted = [cipher_null_MD5, cipher_null_SHA1]
@@ -122,6 +130,14 @@ bulk_aes256 = Bulk
 	, bulkIVSize       = 16
 	, bulkBlockSize    = 16
 	, bulkF            = BulkBlockF aes256_cbc_encrypt aes256_cbc_decrypt
+	}
+
+bulk_camellia128 = Bulk
+	{ bulkName         = "Camellia128"
+	, bulkKeySize      = 16
+	, bulkIVSize       = 16
+	, bulkBlockSize    = 16
+	, bulkF            = BulkBlockF camellia128_cbc_encrypt camellia128_cbc_decrypt
 	}
 
 hash_md5 = Hash
@@ -245,6 +261,28 @@ cipher_AES256_SHA256 = Cipher
 	, cipherHash         = hash_sha256
 	, cipherKeyExchange  = CipherKeyExchange_RSA
 	, cipherMinVer       = Just TLS12
+	}
+
+-- | Camellia (128 bit key), RSA key exchange and SHA1 digest
+cipher_Camellia128_SHA1 :: Cipher
+cipher_Camellia128_SHA1 = Cipher
+	{ cipherID           = 0x41
+	, cipherName         = "RSA-Camellia128-sha1"
+	, cipherBulk         = bulk_camellia128
+	, cipherHash         = hash_sha1
+	, cipherKeyExchange  = CipherKeyExchange_RSA
+	, cipherMinVer       = Just TLS10
+	}
+
+-- | Camellia (128 bit key), RSA key exchange and SHA256 digest
+cipher_Camellia128_SHA256 :: Cipher
+cipher_Camellia128_SHA256 = Cipher
+	{ cipherID           = 0xBA
+	, cipherName         = "RSA-Camellia128-sha256"
+	, cipherBulk         = bulk_camellia128
+	, cipherHash         = hash_sha256
+	, cipherKeyExchange  = CipherKeyExchange_RSA
+	, cipherMinVer       = Just TLS10
 	}
 
 {-
