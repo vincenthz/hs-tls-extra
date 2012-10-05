@@ -9,6 +9,7 @@
 module Network.TLS.Extra.Certificate
 	( certificateChecks
 	, certificateVerifyChain
+	, certificateVerifyChainAgainst
 	, certificateVerifyAgainst
 	, certificateSelfSigned
 	, certificateVerifyDomain
@@ -69,19 +70,32 @@ certificateVerifyChain_ (x:xs) = do
 	-- find a matching certificate that we trust (== installed on the system)
 	foundCert <- SysCert.findCertificate (certMatchDN x)
 	case foundCert of
-		Just sysx509 -> do
-			validChain <- certificateVerifyAgainst x sysx509
-			if validChain
+		Just sysx509 -> 
+			if certificateVerifyAgainst x sysx509
 				then return CertificateUsageAccept
 				else return $ CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
 		Nothing      -> case xs of
 			[] -> return $ CertificateUsageReject CertificateRejectUnknownCA
-			_  -> do
-				validChain <- certificateVerifyAgainst x (head xs)
-				if validChain
-					then certificateVerifyChain_ xs
-					else return $ CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
+			_  -> if certificateVerifyAgainst x (head xs)
+				then certificateVerifyChain_ xs
+				else return $ CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
 #endif
+
+certificateVerifyChainAgainst_ :: [X509] -> [X509] -> TLSCertificateUsage
+certificateVerifyChainAgainst_ _ [] = CertificateUsageReject (CertificateRejectOther "empty chain / no certificates")
+certificateVerifyChainAgainst_ allCerts (x:xs) = 
+	-- find a matching certificate that we trust (== installed on the system)
+	-- foundCert <- SysCert.findCertificate (certMatchDN x)
+	case find (certMatchDN x) allCerts of
+		Just sysx509 -> 
+			if certificateVerifyAgainst x sysx509
+				then CertificateUsageAccept
+				else CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
+		Nothing -> case xs of
+			[] -> CertificateUsageReject CertificateRejectUnknownCA
+			_  -> if certificateVerifyAgainst x (head xs)
+				then certificateVerifyChainAgainst_ allCerts xs
+				else CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
 
 -- | verify a certificates chain using the system certificates available.
 --
@@ -106,14 +120,22 @@ certificateVerifyChain = certificateVerifyChain_ . reorderList
 				Nothing    -> x : reorderList xs
 				Just found -> x : found : reorderList (filter (/= found) xs)
 
+certificateVerifyChainAgainst :: [X509] -> [X509] -> TLSCertificateUsage
+certificateVerifyChainAgainst allCerts = certificateVerifyChainAgainst_ allCerts . reorderList
+	where
+		reorderList []     = []
+		reorderList (x:xs) =
+			case find (certMatchDN x) xs of
+				Nothing    -> x : reorderList xs
+				Just found -> x : found : reorderList (filter (/= found) xs)
+
 -- | verify a certificate against another one.
 -- the first certificate need to be signed by the second one for this function to succeed.
-certificateVerifyAgainst :: X509 -> X509 -> IO Bool
+certificateVerifyAgainst :: X509 -> X509 -> Bool
 certificateVerifyAgainst ux509@(X509 _ _ _ sigalg sig) (X509 scert _ _ _ _) = do
-	let f = verifyF sigalg pk
-	case f udata esig of
-		Right True -> return True
-		_          -> return False
+	case verifyF sigalg pk udata esig of
+		Right True -> True
+		_          -> False
 	where
 		udata = B.concat $ L.toChunks $ getSigningData ux509
 		esig  = B.pack sig
