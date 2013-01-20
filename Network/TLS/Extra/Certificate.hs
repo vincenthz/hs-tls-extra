@@ -73,14 +73,31 @@ certificateVerifyChain_ (x:xs) = do
 			validChain <- certificateVerifyAgainst x sysx509
 			if validChain
 				then return CertificateUsageAccept
-				else return $ CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
+				else return certificateChainDoesntMatch
 		Nothing      -> case xs of
 			[] -> return $ CertificateUsageReject CertificateRejectUnknownCA
-			_  -> do
-				validChain <- certificateVerifyAgainst x (head xs)
-				if validChain
-					then certificateVerifyChain_ xs
-					else return $ CertificateUsageReject (CertificateRejectOther "chain doesn't match each other")
+			cert:_ -> do
+				let exts = certExtensions (x509Cert cert)
+				case checkCA exts of
+					Just r  -> return r
+					Nothing -> do
+						validChain <- certificateVerifyAgainst x cert
+						if validChain
+							then certificateVerifyChain_ xs
+							else return certificateChainDoesntMatch
+	where
+		checkCA Nothing   = return $ certificateNotAllowedToSign
+		checkCA (Just es) = do
+			let kuCanCertSign = case extensionGet es of
+				Just (ExtKeyUsage l) -> elem KeyUsage_keyCertSign l
+				Nothing              -> False
+			case extensionGet es of
+				Just (ExtBasicConstraints True)
+					| kuCanCertSign -> Nothing
+					| otherwise     -> Just certificateNotAllowedToSign
+				_                                      -> Just certificateNotAllowedToSign
+		certificateNotAllowedToSign = CertificateUsageReject $ CertificateRejectOther "certificate is not allowed to sign another certificate"
+		certificateChainDoesntMatch = CertificateUsageReject $ CertificateRejectOther "chain doesn't match each other"
 #endif
 
 -- | verify a certificates chain using the system certificates available.
